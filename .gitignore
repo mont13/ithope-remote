@@ -55,4 +55,8 @@ examples/**/target/
 vcpkg_installed
 flutter/lib/generated_plugin_registrant.dart
 libsciter.dylib
-flutter/web/
+flutter/web/memoryfull/
+# ITHOPE local files
+rustpanel-backup/
+memoryfull/
+ithope_logo.ai
