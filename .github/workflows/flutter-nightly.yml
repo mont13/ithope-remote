@@ -1,10 +1,20 @@
 name: Flutter Nightly Build
 
 on:
-  schedule:
-    # schedule build every night
-    - cron: "0 0 * * *"
+  # Disabled daily schedule — saves GitHub Actions minutes (free tier limit).
+  # Build only on manual trigger or push to master.
+  # To re-enable nightly: uncomment schedule below.
+  # schedule:
+  #   - cron: "0 0 * * *"
   workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'libs/**'
+      - 'src/**'
+      - 'flutter/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 permissions:
   contents: write
