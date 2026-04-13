@@ -1,0 +1,49 @@
+name: Upstream Version Check
+
+# Weekly check if upstream rustdesk/rustdesk has a new release.
+# Sends Telegram notification if update is available.
+# Does NOT build anything — just a 10-second API check.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"  # Monday 8:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check upstream release
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # Get latest upstream release tag
+          UPSTREAM=$(curl -s https://api.github.com/repos/rustdesk/rustdesk/releases/latest | jq -r '.tag_name // empty')
+          # Get our current version from Cargo.toml in our repo
+          OUR=$(curl -s https://raw.githubusercontent.com/${{ github.repository }}/master/Cargo.toml | grep '^version' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+
+          echo "Upstream: $UPSTREAM"
+          echo "Ours: $OUR"
+
+          if [ -z "$UPSTREAM" ] || [ -z "$OUR" ]; then
+            echo "Could not fetch versions, skipping"
+            exit 0
+          fi
+
+          # Strip 'v' prefix if present
+          UPSTREAM_CLEAN="${UPSTREAM#v}"
+
+          if [ "$UPSTREAM_CLEAN" != "$OUR" ]; then
+            echo "UPDATE AVAILABLE: $OUR -> $UPSTREAM_CLEAN"
+            # Send Telegram notification
+            if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+              curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                -H "Content-Type: application/json" \
+                -d "{\"chat_id\":\"${TELEGRAM_CHAT_ID}\",\"text\":\"🔄 <b>ITHOPE Remote — nová verze RustDesk</b>\n\nUpstream: ${UPSTREAM_CLEAN}\nNaše: ${OUR}\n\nPro rebuild: GitHub → Actions → Flutter Nightly Build → Run workflow\n\nhttps://github.com/rustdesk/rustdesk/releases/tag/${UPSTREAM}\",\"parse_mode\":\"HTML\"}"
+              echo "Telegram notification sent"
+            fi
+          else
+            echo "Up to date ($OUR)"
+          fi
