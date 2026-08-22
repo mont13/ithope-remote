@@ -1,4 +1,4 @@
-package com.carriez.flutter_hbb
+package cz.ithope.remote
 
 /**
  * Handle remote input and dispatch android gesture
