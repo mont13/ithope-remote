@@ -82,7 +82,15 @@ protobuf {
 }
 
 android {
-    compileSdkVersion 36
+    // POZOR: compileSdk MUSI zustat 34, i kdyz targetSdk je 35.
+    // Fork jede na AGP 7.3.1 (settings.gradle) a ten si aapt2 stahuje z Mavenu
+    // podle sve vlastni verze, ne z nainstalovanych build-tools. aapt2 z AGP
+    // 7.3.1 neprecte novejsi android.jar a build spadne na:
+    //   aapt2 E LoadedArsc.cpp:94] RES_TABLE_TYPE_TYPE entry offsets overlap
+    //   error: failed to load include path .../android-36/android.jar
+    // targetSdk je jen atribut manifestu, aapt2 linkuje proti compileSdk,
+    // takze 34+35 projde. Zvednuti compileSdk = upgrade AGP na 8.x.
+    compileSdkVersion 34
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
 
