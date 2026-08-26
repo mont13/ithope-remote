@@ -214,6 +214,15 @@ class MainService : Service() {
 
     // video
     private var mediaProjection: MediaProjection? = null
+
+    // ITHOPE: povinny od Android 14 (API 34) — viz onStartCommand.
+    // onStop() prijde, kdyz uzivatel sdileni ukonci ze systemove listy.
+    private val mediaProjectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.d(logTag, "MediaProjection.onStop: uzivatel ukoncil sdileni obrazovky")
+            stopCapture()
+        }
+    }
     private var surface: Surface? = null
     private val sendVP9Thread = Executors.newSingleThreadExecutor()
     private var videoEncoder: MediaCodec? = null
@@ -339,6 +348,14 @@ class MainService : Service() {
             intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
                 mediaProjection =
                     mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
+                // ITHOPE: Android 14 (API 34) vyzaduje registrovany callback DRIV,
+                // nez se zavola createVirtualDisplay(). Bez nej vyhodi:
+                //   IllegalStateException: Must register a callback before starting
+                //   capture, to manage resources
+                // a klient dostane spojeni, ale zadny obraz (cerna obrazovka).
+                // Upstream RustDesk to nema — vsechny jeho verze cili targetSdk 33,
+                // kde to povinne nebylo. My mame 35 (Play od 2026-08 nize nepusti).
+                mediaProjection?.registerCallback(mediaProjectionCallback, null)
                 checkMediaPermission()
                 _isReady = true
             } ?: let {
