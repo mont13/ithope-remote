@@ -229,9 +229,21 @@ class MainService : Service() {
     // relace nechodil a tenhle rozdil nebyl videt.
     @Volatile private var obnovitSnimaniPoNovemSouhlasu = false
     @Volatile private var pokusuONovySouhlas = 0
+    // Bezi prave ted zadost o novy souhlas? Bez tohohle si o nej reknou dve
+    // souběžná vlakna zaraz (viz createOrSetVirtualDisplay) a vzniknou DVE
+    // projekce — ta druha zabije prvni a obraz zmizi.
+    @Volatile private var zadostOSouhlasBezi = false
+    // Poradove cislo projekce. onStop chodi i za uz nahrazenou projekci a bez
+    // rozliseni generace by takovy pozdni onStop shodil snimani, ktere mezitim
+    // bezi na nove projekci.
+    @Volatile private var projekceGenerace = 0
 
-    private val mediaProjectionCallback = object : MediaProjection.Callback() {
+    private fun callbackProGeneraci(generace: Int) = object : MediaProjection.Callback() {
         override fun onStop() {
+            if (generace != projekceGenerace) {
+                Log.d(logTag, "MediaProjection.onStop: stara projekce #$generace (aktualni #$projekceGenerace), ignoruji")
+                return
+            }
             if (obnovitSnimaniPoNovemSouhlasu) {
                 Log.d(logTag, "MediaProjection.onStop: token zneplatnen, cekam na novy souhlas")
                 // Stary VirtualDisplay patri uz mrtve projekci — musi vzniknout novy,
@@ -367,6 +379,9 @@ class MainService : Service() {
                 getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
             intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
+                zadostOSouhlasBezi = false
+                projekceGenerace++
+                val generace = projekceGenerace
                 mediaProjection =
                     mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
                 // ITHOPE: Android 14 (API 34) vyzaduje registrovany callback DRIV,
@@ -376,7 +391,7 @@ class MainService : Service() {
                 // a klient dostane spojeni, ale zadny obraz (cerna obrazovka).
                 // Upstream RustDesk to nema — vsechny jeho verze cili targetSdk 33,
                 // kde to povinne nebylo. My mame 35 (Play od 2026-08 nize nepusti).
-                mediaProjection?.registerCallback(mediaProjectionCallback, null)
+                mediaProjection?.registerCallback(callbackProGeneraci(generace), null)
                 checkMediaPermission()
                 _isReady = true
                 // ITHOPE: kdyz jsme sem prisli po zneplatneni tokenu, snimani uz
@@ -385,7 +400,7 @@ class MainService : Service() {
                 // klient visi na "Connected, waiting for image…".
                 if (obnovitSnimaniPoNovemSouhlasu) {
                     obnovitSnimaniPoNovemSouhlasu = false
-                    Log.d(logTag, "novy souhlas ziskan, obnovuji snimani")
+                    Log.d(logTag, "novy souhlas ziskan (projekce #$generace), obnovuji snimani")
                     stopCapture()    // uklid po mrtve projekci; shodi i _isStart,
                     startCapture()   // jinak by startCapture() hned vyskocil
                 }
@@ -581,6 +596,10 @@ class MainService : Service() {
 
     // https://github.com/bk138/droidVNC-NG/blob/b79af62db5a1c08ed94e6a91464859ffed6f4e97/app/src/main/java/net/christianbeier/droidvnc_ng/MediaProjectionService.java#L250
     // Reuse virtualDisplay if it exists, to avoid media projection confirmation dialog every connection.
+    // @Synchronized: startCapture() umi prijit ze dvou vlaken naraz (napr. kdyz
+    // klient zmeni kvalitu a soucasne bezi start relace). Bez zamku obe vlakna
+    // narazi na SecurityException a obe si reknou o souhlas.
+    @Synchronized
     private fun createOrSetVirtualDisplay(mp: MediaProjection, s: Surface) {
         try {
             virtualDisplay?.let {
@@ -602,7 +621,14 @@ class MainService : Service() {
                 Log.e(logTag, "createOrSetVirtualDisplay: SecurityException i po $pokusuONovySouhlas pokusech, koncim")
                 return
             }
+            // ITHOPE: kdyz uz o souhlas nekdo pozadal, nezadat podruhe — jinak
+            // vzniknou dve projekce a ta druha shodi obraz te prvni.
+            if (zadostOSouhlasBezi) {
+                Log.d(logTag, "createOrSetVirtualDisplay: zadost o souhlas uz bezi, necham to na ni")
+                return
+            }
             pokusuONovySouhlas++
+            zadostOSouhlasBezi = true
             // ITHOPE: rekni onStop(), ze tohle NENI ukonceni uzivatelem, a rekni
             // obsluze nove projekce, ze ma snimani znovu rozjet.
             obnovitSnimaniPoNovemSouhlasu = true
