@@ -216,9 +216,30 @@ class MainService : Service() {
     private var mediaProjection: MediaProjection? = null
 
     // ITHOPE: povinny od Android 14 (API 34) — viz onStartCommand.
-    // onStop() prijde, kdyz uzivatel sdileni ukonci ze systemove listy.
+    //
+    // POZOR: onStop() neznamena jen "uzivatel ukoncil sdileni". Od Android 15
+    // (API 35) plati, ze token souhlasu se da pouzit JEDNOU (countStarts=1).
+    // Kdyz se pak pri prichozim spojeni vola createVirtualDisplay se stejnym
+    // tokenem, system vyhodi SecurityException, projekci sam zastavi a rozesle
+    // onStop — uprostred zivé relace. Kdyby se v te chvili zavolalo
+    // stopCapture(), rozpadne se cela pipeline a protistrana uvizne na
+    //   "Connected, waiting for image…"  (cerna obrazovka)
+    // presne jak se stalo 2026-08-27 po prechodu na targetSdk 35.
+    // Na targetSdk 34 se token jeste smel pouzit znovu, takze onStop uprostred
+    // relace nechodil a tenhle rozdil nebyl videt.
+    @Volatile private var obnovitSnimaniPoNovemSouhlasu = false
+    @Volatile private var pokusuONovySouhlas = 0
+
     private val mediaProjectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
+            if (obnovitSnimaniPoNovemSouhlasu) {
+                Log.d(logTag, "MediaProjection.onStop: token zneplatnen, cekam na novy souhlas")
+                // Stary VirtualDisplay patri uz mrtve projekci — musi vzniknout novy,
+                // jinak by ho createOrSetVirtualDisplay jen "recykloval".
+                virtualDisplay?.release()
+                virtualDisplay = null
+                return
+            }
             Log.d(logTag, "MediaProjection.onStop: uzivatel ukoncil sdileni obrazovky")
             stopCapture()
         }
@@ -358,6 +379,16 @@ class MainService : Service() {
                 mediaProjection?.registerCallback(mediaProjectionCallback, null)
                 checkMediaPermission()
                 _isReady = true
+                // ITHOPE: kdyz jsme sem prisli po zneplatneni tokenu, snimani uz
+                // nikdo znovu nespusti — upstream se spoleha na to, ze startCapture()
+                // vyvola prichozi spojeni, jenze to uz davno probehlo. Bez tohohle
+                // klient visi na "Connected, waiting for image…".
+                if (obnovitSnimaniPoNovemSouhlasu) {
+                    obnovitSnimaniPoNovemSouhlasu = false
+                    Log.d(logTag, "novy souhlas ziskan, obnovuji snimani")
+                    stopCapture()    // uklid po mrtve projekci; shodi i _isStart,
+                    startCapture()   // jinak by startCapture() hned vyskocil
+                }
             } ?: let {
                 Log.d(logTag, "getParcelableExtra intent null, invoke requestMediaProjection")
                 requestMediaProjection()
@@ -562,8 +593,21 @@ class MainService : Service() {
                     s, null, null
                 )
             }
+            pokusuONovySouhlas = 0   // ITHOPE: povedlo se, pocitadlo pokusu zpet na nulu
         } catch (e: SecurityException) {
             Log.w(logTag, "createOrSetVirtualDisplay: got SecurityException, re-requesting confirmation");
+            // ITHOPE: pojistka proti zacykleni — kdyby novy souhlas take neprosel,
+            // netocit dialog donekonecna.
+            if (pokusuONovySouhlas >= 2) {
+                Log.e(logTag, "createOrSetVirtualDisplay: SecurityException i po $pokusuONovySouhlas pokusech, koncim")
+                return
+            }
+            pokusuONovySouhlas++
+            // ITHOPE: rekni onStop(), ze tohle NENI ukonceni uzivatelem, a rekni
+            // obsluze nove projekce, ze ma snimani znovu rozjet.
+            obnovitSnimaniPoNovemSouhlasu = true
+            virtualDisplay?.release()
+            virtualDisplay = null
             // This initiates a prompt dialog for the user to confirm screen projection.
             requestMediaProjection()
         }
