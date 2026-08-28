@@ -1340,6 +1340,17 @@ class FfiModel with ChangeNotifier {
     _pi.username = evt['username'];
     _pi.hostname = evt['hostname'];
     _pi.platform = evt['platform'];
+    // ITHOPE: u mobilni protistrany paletu Mobile Actions (zpet / plocha /
+    // prehled) zapneme vzdy. Vychozi chovani ji sice zobrazuje, ale jedno
+    // omylem trefene "skryt" ulozi showMobileActions='N' a paleta uz se
+    // nevrati ani po restartu klienta. Na telefonu se pritom bez ni ovlada
+    // mizerne: gesto zpet je tazeni od kraje obrazovky, coz se mysi dela spatne.
+    // Skryt ji jde porad — jen se priste zase objevi. store: false schvalne,
+    // at se do konfigurace nic nezapisuje.
+    if (_pi.platform == kPeerPlatformAndroid) {
+      parent.target?.dialogManager
+          .setMobileActionsOverlayVisible(true, store: false);
+    }
     _pi.sasEnabled = evt['sas_enabled'] == 'true';
     final currentDisplay = int.parse(evt['current_display']);
     if (_pi.primaryDisplay == kInvalidDisplayIndex) {
